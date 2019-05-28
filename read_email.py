@@ -7,7 +7,7 @@ import time
 import xlsxwriter
 
 # indent用于缩进显示:
-def print_info(msg, result, f=None, indent=0):
+def extract_info(msg, result, f=None, indent=0):
     if indent == 0:
         for header in msg.keys():#['From', 'To', 'Subject']:
             value = msg.get(header, '')
@@ -37,7 +37,7 @@ def print_info(msg, result, f=None, indent=0):
         for n, part in enumerate(parts):
             f.write('%sPart %s/%s\n'              % ('  ' * indent, n+1, len(parts)))
             f.write('%s{\n' % ('  ' * indent))
-            print_info(part, result, f, indent + 1)
+            extract_info(part, result, f, indent + 1)
             f.write('%s}\n' % ('  ' * indent))
     else:
         content_type = msg.get_content_type()
@@ -49,12 +49,13 @@ def print_info(msg, result, f=None, indent=0):
                 content = content.decode(charset)
             f.write('%sText:\n'       % ('  ' * indent))
             f.write(content)
+            if content_type=='text/plain':
+                result['Text'] = content
         else:
             filename = decode_str(msg.get_filename('unknown_file_name'))[0]
             f.write('%sAttachment: %s, %s\n' % ('  ' * indent, content_type, filename))
             if msg.get_content_disposition() == 'attachment':
-                result['Attachments'].append(filename)
-            
+                result['Attachments'].append(filename)        
 
 def decode_str(s):
     r = []
@@ -74,7 +75,7 @@ def guess_charset(msg):
 
 workbook = xlsxwriter.Workbook('output.xlsx')
 ws = workbook.add_worksheet()
-wrap = workbook.add_format({'text_wrap': True})
+fmt = workbook.add_format({'text_wrap': True, 'valign': 'top'})
 row = 0
 
 ws.write(row, 0, '时间')
@@ -87,26 +88,46 @@ ws.write(row, 3, '抄送')
 ws.set_column(3, 3, 40)
 ws.write(row, 4, '主题')
 ws.set_column(4, 4, 50)
-ws.write(row, 5, '附件')
-ws.set_column(5, 5, 70)
+ws.write(row, 5, '正文')
+ws.set_column(5, 5, 50)
+ws.write(row, 6, '附件')
+ws.set_column(6, 6, 70)
 row+=1
-for path in os.listdir('.'):  
-    if os.path.isfile(path) and path.endswith('.eml'):
-        f = open(path, "r", encoding='utf-8')
+folder = 'emls'
+for path in os.listdir(folder): 
+    file = folder + '/' + path
+    if os.path.isfile(file) and file.endswith('.eml'):
+        print('Reading %s' % file)
+        f = open(file, "r", encoding='utf-8')
         email_string = f.read()
         f.close()
         out = open(os.path.basename(path)+".txt", "w", encoding='utf-8')
+        #out = open(os.devnull, "w", encoding='utf-8')
         msg = message_from_string(email_string)
         result = {}
         result['Attachments'] = []
-        print_info(msg, result, out)
-        ws.write(row, 0, result['Date'])
-        ws.write(row, 1, '\r\n'.join(result['From']), wrap)
-        ws.write(row, 2, '\r\n'.join(result['To']), wrap)
-        ws.write(row, 3, '\r\n'.join(result['Cc']), wrap)
-        ws.write(row, 4, result['Subject'])
-        ws.write(row, 5, '\r\n'.join(result['Attachments']), wrap)
+        result['Text'] = ''
+        result['Cc'] = []
+        extract_info(msg, result, out)
         out.close()
+        
+        ws.write(row, 0, result['Date'])
+        ws.write(row, 1, '\r\n'.join(result['From']), fmt)
+        ws.write(row, 2, '\r\n'.join(result['To']), fmt)
+        ws.write(row, 3, '\r\n'.join(result['Cc']), fmt)
+        ws.write(row, 4, result['Subject'], fmt)
+        
+        text = result['Text']
+        text = text.replace("\r\n", "\n")
+        text = text.split('\n')
+        text_only_this_email = []
+        for line in text:
+            if line.startswith('发件人：') or line.startswith('From:'):
+                break
+            text_only_this_email.append(line)
+            
+        ws.write(row, 5, '\r\n'.join(text_only_this_email), fmt)
+        ws.write(row, 6, '\r\n'.join(result['Attachments']), fmt)
         row+=1
 
 
